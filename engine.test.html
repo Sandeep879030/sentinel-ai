@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sentinel Engine Comprehensive Test Suite</title>
+</head>
+<body>
+    <div id="test-results">Running tests...</div>
+    <script src="rules.js"></script>
+    <script src="engine.js"></script>
+    <script>
+        const engine = new SentinelEngine(window.THREAT_RULES);
+        const results = [];
+
+        function assert(condition, message) {
+            if (condition) {
+                results.push({ pass: true, message: "[PASS] " + message });
+            } else {
+                results.push({ pass: false, message: "[FAIL] " + message });
+                console.error("Test failed: " + message);
+            }
+        }
+
+        // Test 1: Fictional message asking for an OTP urgently
+        try {
+            const r1 = engine.analyze("ALERT: Unauthorized access detected. Your Chase checking account is locked. Enter your 6-digit OTP verification code within 15 minutes at http://chase-security-verify.xyz/auth or your funds will be frozen permanently.", "message");
+            assert(r1.riskScore >= 75, "Test 1: Urgent OTP message scores High/Critical (" + r1.riskScore + "/100)");
+            assert(r1.riskLevel === "Critical" || r1.riskLevel === "High", "Test 1: Risk level is High or Critical");
+            assert(r1.vectorScores.urgency > 0, "Test 1: Urgency detected");
+            assert(r1.vectorScores.credentials > 0, "Test 1: Credentials / OTP detected");
+            assert(r1.vectorScores.impersonation > 0, "Test 1: Impersonation detected");
+            assert(r1.vectorScores.urlRisk > 0, "Test 1: Suspicious URL detected");
+            assert(r1.urlAnalysis !== null, "Test 1: Embedded URL was extracted and analyzed");
+        } catch (e) {
+            assert(false, "Test 1 threw error: " + e.message);
+        }
+
+        // Test 2: Normal college announcement (Safe baseline)
+        try {
+            const r2 = engine.analyze("Campus Notice: Spring semester registration opens Monday at 9:00 AM for all undergraduate students. Please consult your academic advisor and review your degree audit before selecting courses. Official course schedules are available on the university student portal at https://registrar.university.edu/courses. Standard tuition billing will process through your regular student account.", "message");
+            assert(r2.riskScore < 30, "Test 2: Normal college announcement scores Low/Safe (" + r2.riskScore + "/100)");
+            assert(r2.riskLevel === "Low", "Test 2: Risk level is Low");
+            assert(r2.findings.length === 0, "Test 2: 0 threat findings matched for benign announcement");
+        } catch (e) {
+            assert(false, "Test 2 threw error: " + e.message);
+        }
+
+        // Test 3: Syntactically valid example URL
+        try {
+            const r3 = engine.analyze("https://secure-login.paypal.com.account-verification-service.click/auth?session=active", "url");
+            assert(r3.riskScore >= 60, "Test 3: Spoofed subdomain URL scores High (" + r3.riskScore + "/100)");
+            assert(r3.urlAnalysis !== null, "Test 3: urlAnalysis object generated");
+            assert(r3.urlAnalysis.isHttps === true, "Test 3: Parsed HTTPS protocol");
+            assert(r3.urlAnalysis.isSuspiciousTLD === true, "Test 3: Detected high-risk TLD .click");
+            assert(r3.urlAnalysis.spoofedBrand === "paypal", "Test 3: Identified spoofed brand in subdomain");
+        } catch (e) {
+            assert(false, "Test 3 threw error: " + e.message);
+        }
+
+        // Test 4: Syntactically valid benign URL
+        try {
+            const r4 = engine.analyze("https://www.github.com/security/advisories", "url");
+            assert(r4.riskScore < 30, "Test 4: Benign GitHub URL scores Low (" + r4.riskScore + "/100)");
+            assert(r4.riskLevel === "Low", "Test 4: Benign URL classified as Low");
+            assert(r4.urlAnalysis.isSuspiciousTLD === false, "Test 4: Standard .com TLD recognized");
+        } catch (e) {
+            assert(false, "Test 4 threw error: " + e.message);
+        }
+
+        // Test 5: Invalid URL handling
+        try {
+            let threw = false;
+            let errMsg = "";
+            try {
+                engine.analyze("not_a_valid_url", "url");
+            } catch (err) {
+                threw = true;
+                errMsg = err.message;
+            }
+            assert(threw, "Test 5: Invalid URL string throws error");
+            assert(errMsg.includes("Invalid URL"), "Test 5: Error message contains descriptive explanation");
+        } catch (e) {
+            assert(false, "Test 5 failed: " + e.message);
+        }
+
+        // Test 6: Empty input handling
+        try {
+            let threw = false;
+            try {
+                engine.analyze("   ", "message");
+            } catch (err) {
+                threw = true;
+            }
+            assert(threw, "Test 6: Empty input correctly throws validation error");
+        } catch (e) {
+            assert(false, "Test 6 validation failed: " + e.message);
+        }
+
+        // Test 7: Repeated scans with different content
+        try {
+            const scanA = engine.analyze("USPS Notice: Your parcel #US-849201 is on hold due to missing address fee ($1.85). Settle payment within 24 hours at https://bit.ly/usps-redelivery", "message");
+            const scanB = engine.analyze("Normal meeting notes from our quarterly planning session.", "message");
+            const scanC = engine.analyze("Confidential: Immediate wire transfer of $25,000 required for invoice before 4 PM today.", "message");
+            assert(scanA.riskScore >= 60, "Test 7: Scan A (USPS) scores High (" + scanA.riskScore + ")");
+            assert(scanB.riskScore === 0, "Test 7: Scan B (Normal notes) scores 0");
+            assert(scanC.riskScore >= 60, "Test 7: Scan C (CEO Wire) scores High (" + scanC.riskScore + ")");
+            assert(scanA.riskScore !== scanB.riskScore, "Test 7: Dynamic differentiation between threat and benign");
+        } catch (e) {
+            assert(false, "Test 7 threw error: " + e.message);
+        }
+
+        // Output results to document
+        const container = document.getElementById("test-results");
+        container.innerHTML = "<h3>ENTERPRISE UNIT TEST RESULTS</h3>" + 
+            results.map(r => "<div style='color:" + (r.pass ? "green" : "red") + "'>" + r.message + "</div>").join("");
+    </script>
+</body>
+</html>
